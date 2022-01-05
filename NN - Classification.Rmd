@@ -1,0 +1,269 @@
+
+# Preprocessing
+
+```{r}
+setwd("~/Travail/M1 DSC -- MAM4/S8/DataValo/KagD2")
+```
+
+```{r}
+library(tfdatasets)
+library(keras)
+library(tidyverse)
+```
+
+```{r}
+data_file_path = "flavors_of_cacao.csv"
+```
+
+```{r}
+chocodata <- read.csv(data_file_path)
+```
+
+```{r}
+# some of our column names have spaces in them. This line changes the column names to 
+# versions without spaces, which lets us talk about the columns by their names.
+names(chocodata) <- make.names(names(chocodata), unique=TRUE)
+# turn the percentages into numbers
+chocodata$Cocoa.Percent <- sapply(chocodata$Cocoa.Percent, function(x) gsub("%", "", x))
+# convert all the stuff that can be converted (like "75" for the percentages) into numeric types (like 75 the integer)
+chocodata <- type_convert(chocodata)
+# get rid of that useless, half-empty column
+chocodata <- subset(chocodata, select = -Bean.Type)
+```
+
+```{r}
+# Rename the column in the R version for some reason
+names(chocodata)[1] <- "Company...Maker.if.known."
+```
+
+```{r}
+# We want to be able to turn the string elements to numeric encodings, 
+# and for that we must get rid of the spaces and parentheses in the names
+chocodata$Company...Maker.if.known. <- make.names(chocodata$Company...Maker.if.known.)
+chocodata$Specific.Bean.Origin.or.Bar.Name <- make.names(chocodata$Specific.Bean.Origin.or.Bar.Name)
+chocodata$Company.Location <- make.names(chocodata$Company.Location)
+chocodata$Broad.Bean.Origin <- make.names(chocodata$Broad.Bean.Origin)
+#head(chocodata, 50) # to see what that did to the dataset
+```
+
+
+```{r}
+# on mélange les rows
+set.seed(622)
+shuffled_rows_indices <- sample(nrow(chocodata))
+chocodata <- chocodata[shuffled_rows_indices, ]
+```
+
+```{r}
+# on crée les tokenizers qui vont transformer les noms en entiers
+tok_Company <- text_tokenizer(lower=FALSE, filter="")
+tok_BeanOrig <- text_tokenizer(lower=FALSE, filter="")
+tok_CompanyLoc <- text_tokenizer(lower=FALSE, filter="")
+tok_BroadBean <- text_tokenizer(lower=FALSE, filter="")
+```
+
+```{r}
+# on fait apprendre aux tokenizers le vocabulaire nécessaire pour chaque colonne
+fit_text_tokenizer(tok_Company, chocodata$Company...Maker.if.known.)
+fit_text_tokenizer(tok_BeanOrig, chocodata$Specific.Bean.Origin.or.Bar.Name)
+fit_text_tokenizer(tok_CompanyLoc, chocodata$Company.Location)
+fit_text_tokenizer(tok_BroadBean, chocodata$Broad.Bean.Origin)
+```
+
+```{r}
+# transforme les strings en listes d'entiers, mais chaque liste est de taille 1
+# parce qu'on a pris le soin de transformer "hello world" en "hello.world" ce qui fait 1 mot
+chocodata$Company...Maker.if.known. <- texts_to_sequences(tok_Company, chocodata$Company...Maker.if.known.)
+chocodata$Specific.Bean.Origin.or.Bar.Name <- texts_to_sequences(tok_BeanOrig, chocodata$Specific.Bean.Origin.or.Bar.Name)
+chocodata$Company.Location <- texts_to_sequences(tok_CompanyLoc, chocodata$Company.Location)
+chocodata$Broad.Bean.Origin <- texts_to_sequences(tok_BroadBean, chocodata$Broad.Bean.Origin)
+```
+
+```{r}
+# du coup on transforme les listes de taille 1 en entiers
+chocodata$Company...Maker.if.known. <- unlist(chocodata$Company...Maker.if.known.)
+chocodata$Specific.Bean.Origin.or.Bar.Name <- unlist(chocodata$Specific.Bean.Origin.or.Bar.Name)
+chocodata$Company.Location <- unlist(chocodata$Company.Location)
+chocodata$Broad.Bean.Origin <- unlist(chocodata$Broad.Bean.Origin)
+```
+
+```{r}
+hist(chocodata$Rating, breaks=5)
+```
+
+
+
+```{r}
+true_ratings <- chocodata$Rating
+n = nrow(chocodata)
+rat_min <- min(true_ratings)
+rat_max <- max(true_ratings)
+
+equalize <- function(r){
+  y <- length(which(true_ratings >= r))/n
+  return(y * (rat_max - rat_min) + rat_min)
+}
+
+
+to_class <- function(r) {
+  return(round(r) - 1)
+}
+
+
+chocodata$Rating <- unlist(map(chocodata$Rating, to_class))
+```
+
+```{r}
+hist(chocodata$Rating, breaks=5)
+```
+
+
+```{r}
+head(chocodata$Rating, 20)
+```
+
+
+```{r}
+# Zero mean and unit variance
+for (feat in names(chocodata)) {
+  if (feat != "Rating") {
+    chocodata[[feat]] <- c(scale(chocodata[[feat]]))
+  }
+}
+```
+
+
+
+# Partie NN
+
+
+
+```{r}
+# features et target
+X = chocodata[ , c("Company...Maker.if.known.", 
+                   "Specific.Bean.Origin.or.Bar.Name", 
+                   "Review.Date", 
+                   "Cocoa.Percent", 
+                   "Company.Location", 
+                   "Broad.Bean.Origin")]
+Y = chocodata[ , c("Rating")]
+```
+
+```{r}
+# train/test sets
+splitter <- sample(c(rep(0, 0.8 * nrow(chocodata)), rep(1, 0.2 * nrow(chocodata))))
+x_train <- X[splitter == 0, ]   
+x_test <- X[splitter == 1, ]
+y_train <- Y[splitter ==0]
+y_test <- Y[splitter ==1]
+```
+
+```{r}
+# conversion dataframe -> tf$Tensor
+x_traine <- tf$convert_to_tensor(x_train)
+y_traine <- tf$convert_to_tensor(y_train)
+x_teste <- tf$convert_to_tensor(x_test)
+y_teste <- tf$convert_to_tensor(y_test)
+```
+
+```{r}
+# on définit l'architecture du modèle
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units = 6, activation="relu", input_shape = c(NULL,6)) %>%
+  layer_dense(units = 10, activation = 'relu') %>%
+  layer_dense(units = 20, activation = 'relu') %>%
+  layer_dense(units = 10, activation = 'relu') %>%
+  layer_dense(units = 5, activation = 'relu') %>%
+  layer_dense(units = 5, activation = "softmax")
+```
+
+```{r}
+# on définit les paramètres d'entrainement du modèle
+model %>% compile(
+  optimizer = "adam", 
+  loss = loss_sparse_categorical_crossentropy
+)
+
+```
+
+```{r}
+# stop training when val_loss stops decreasing
+
+ early_stop = callback_early_stopping(patience=5, 
+                                      monitor = "val_loss", 
+                                      mode = "min", 
+                                      verbose = 1,
+                                      restore_best_weights = TRUE)
+```
+
+```{r}
+# training
+history <- fit(model, 
+               x_traine, 
+               y_traine, 
+               epochs = 100, 
+               verbose = 2, 
+               validation_data = c(x_teste, y_teste),
+               callbacks = early_stop
+)
+```
+
+
+```{r}
+get_real <- function(i){
+  return(k_get_value(y_teste[i]) + 1)
+  
+}
+
+
+get_pred <- function(i){
+  test <- k_reshape(x_teste[i,], c(1,6))
+  pred <- (predict(model, x=test)[1,])
+  return(which(pred == max(pred)))   
+}
+
+```
+
+```{r}
+get_real(5)
+```
+
+
+```{r}
+get_pred(5)
+```
+
+
+```{r}
+x <- 10:30
+plot(x, map(x, get_real), col="black", ylab = "Rating", xlab = "Echantillon", pch=1)
+points(x, map(x, get_pred), col="red", pch=3)
+legend("bottomleft", legend = c("True", "Predicted"), pch=c(1, 3), col = c("black", "red"), bty="o")
+```
+
+
+```{r}
+length(which(chocodata$Rating == 3))
+```
+
+```{r}
+length(chocodata$Rating)
+```
+
+
+```{r}
+N = 1:359
+all_test_reals <- c(unlist(map(N, get_real)))
+all_test_preds <- c(unlist(map(N, get_pred)))
+
+
+length(which(all_test_reals == all_test_preds))
+```
+
+```{r}
+205/359
+```
+
+
+
