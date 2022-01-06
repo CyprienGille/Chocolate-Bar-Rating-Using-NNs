@@ -3,6 +3,7 @@
 > Note: Ce repo est une archive d'un Kaggle challenge.
 
 Ce repository provient d'un Kaggle challenge: La prédiction du rating d'une barre de chocolat à partir des features de cette dernière, et ce par un neural network.
+Ce code utilise l'api [keras pour le langage R](https://tensorflow.rstudio.com/guide/keras/) (le kaggle challenge imposait l'usage de R).
 
 Ce repo contient:
  - Fichier `.ipynb` : notebook provenant de Kaggle, avec tous les détails et commentaires. Pour voir le processus utilisé lors du challenge et des commentaires sur les résulats.
